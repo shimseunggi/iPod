@@ -246,6 +246,25 @@
         } catch(e) { } 
       }, []);
 
+      const triggerSwitchHaptic = () => {
+        if (!window.matchMedia?.('(pointer: coarse)').matches) return false;
+
+        const labelEl = document.createElement('label');
+        const inputEl = document.createElement('input');
+
+        labelEl.ariaHidden = 'true';
+        labelEl.style.display = 'none';
+        inputEl.type = 'checkbox';
+        inputEl.setAttribute('switch', '');
+
+        labelEl.appendChild(inputEl);
+        document.head.appendChild(labelEl);
+        labelEl.click();
+        document.head.removeChild(labelEl);
+
+        return true;
+      };
+
       const triggerHaptic = useCallback((kind = 'selection') => {
         try {
           const isPulse = kind === 'selection' || kind === 'button';
@@ -283,7 +302,11 @@
             }
           }
 
-          if (isPulse && navigator.vibrate) navigator.vibrate(kind === 'button' ? 12 : 8);
+          if (isPulse && navigator.vibrate) {
+            navigator.vibrate(kind === 'button' ? 12 : 8);
+            return;
+          }
+          if (isPulse) triggerSwitchHaptic();
         } catch(e) { }
       }, []);
 

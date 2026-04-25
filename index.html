@@ -176,6 +176,7 @@
       const wheelScrollAccumulator = useRef(0);
       const audioCtxRef = useRef(null);
       const lastHapticAtRef = useRef(0);
+      const hapticSwitchRef = useRef(null);
       const sleepTimerRef = useRef(null);
 
       const currentMenu = menuStack[menuStack.length - 1];
@@ -249,21 +250,39 @@
       const triggerSwitchHaptic = () => {
         if (!window.matchMedia?.('(pointer: coarse)').matches) return false;
 
-        const labelEl = document.createElement('label');
-        const inputEl = document.createElement('input');
+        if (!hapticSwitchRef.current) {
+          const labelEl = document.createElement('label');
+          const inputEl = document.createElement('input');
 
-        labelEl.ariaHidden = 'true';
-        labelEl.style.display = 'none';
-        inputEl.type = 'checkbox';
-        inputEl.setAttribute('switch', '');
+          labelEl.ariaHidden = 'true';
+          labelEl.style.cssText = [
+            'position:fixed',
+            'left:-1000px',
+            'top:-1000px',
+            'width:1px',
+            'height:1px',
+            'opacity:0',
+            'pointer-events:none',
+            'z-index:-1',
+          ].join(';');
+          inputEl.type = 'checkbox';
+          inputEl.tabIndex = -1;
+          inputEl.setAttribute('switch', '');
 
-        labelEl.appendChild(inputEl);
-        document.head.appendChild(labelEl);
-        labelEl.click();
-        document.head.removeChild(labelEl);
+          labelEl.appendChild(inputEl);
+          document.body.appendChild(labelEl);
+          hapticSwitchRef.current = labelEl;
+        }
+
+        hapticSwitchRef.current.click();
 
         return true;
       };
+
+      const isIOSLike = () => (
+        /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+      );
 
       const triggerHaptic = useCallback((kind = 'selection') => {
         try {
@@ -301,6 +320,8 @@
               return;
             }
           }
+
+          if (isPulse && isIOSLike() && triggerSwitchHaptic()) return;
 
           if (isPulse && navigator.vibrate) {
             navigator.vibrate(kind === 'button' ? 12 : 8);
@@ -363,7 +384,6 @@
 
       const handleMove = useCallback((e) => {
         if (!isInteracting || !wheelRef.current || isScreenOff) return;
-        e.preventDefault();
         resetSleepTimer();
 
         const rect = wheelRef.current.getBoundingClientRect();
@@ -384,6 +404,7 @@
           }
         }
         interactionState.current.prevAngle = currentAngle;
+        if (e.cancelable) e.preventDefault();
       }, [isInteracting, isScreenOff, processScroll, resetSleepTimer]);
 
       const handleNativeWheel = useCallback((e) => {
@@ -486,6 +507,20 @@
             }
           }
         });
+      };
+
+      const handleWheelButtonDown = (e, action) => {
+        e.stopPropagation();
+        handleInteraction(() => setActiveButton(action));
+      };
+
+      const handleWheelButtonUp = (e, action) => {
+        e.stopPropagation();
+        if (activeButton === action) {
+          handleWheelAction(action);
+        } else {
+          setActiveButton(null);
+        }
       };
 
       const formatTime = (seconds) => {
@@ -655,28 +690,36 @@
               >
                 <div 
                   className={`absolute top-[12px] left-1/2 -translate-x-1/2 w-16 h-8 flex items-center justify-center font-bold text-[#959595] text-[12px] tracking-[0.15em] cursor-pointer wheel-btn ${activeButton === 'menu' ? 'text-[#3B99D8]' : ''}`}
-                  onPointerDown={(e) => { e.stopPropagation(); handleWheelAction('menu'); }}
+                  onPointerDown={(e) => handleWheelButtonDown(e, 'menu')}
+                  onPointerUp={(e) => handleWheelButtonUp(e, 'menu')}
+                  onPointerLeave={() => setActiveButton(null)}
                 >
                   MENU
                 </div>
                 
                 <div 
                   className={`absolute bottom-[14px] left-1/2 -translate-x-1/2 w-16 h-8 flex items-center justify-center text-[#959595] cursor-pointer wheel-btn gap-1 ${activeButton === 'playpause' ? 'text-[#3B99D8]' : ''}`}
-                  onPointerDown={(e) => { e.stopPropagation(); handleWheelAction('playpause'); }}
+                  onPointerDown={(e) => handleWheelButtonDown(e, 'playpause')}
+                  onPointerUp={(e) => handleWheelButtonUp(e, 'playpause')}
+                  onPointerLeave={() => setActiveButton(null)}
                 >
                   <PlayPauseIcon className="opacity-90" />
                 </div>
 
                 <div 
                   className={`absolute left-[14px] top-1/2 -translate-y-1/2 w-8 h-16 flex items-center justify-center text-[#959595] cursor-pointer wheel-btn ${activeButton === 'prev' ? 'text-[#3B99D8]' : ''}`}
-                  onPointerDown={(e) => { e.stopPropagation(); handleWheelAction('prev'); }}
+                  onPointerDown={(e) => handleWheelButtonDown(e, 'prev')}
+                  onPointerUp={(e) => handleWheelButtonUp(e, 'prev')}
+                  onPointerLeave={() => setActiveButton(null)}
                 >
                   <PrevIcon className="opacity-90" />
                 </div>
 
                 <div 
                   className={`absolute right-[14px] top-1/2 -translate-y-1/2 w-8 h-16 flex items-center justify-center text-[#959595] cursor-pointer wheel-btn ${activeButton === 'next' ? 'text-[#3B99D8]' : ''}`}
-                  onPointerDown={(e) => { e.stopPropagation(); handleWheelAction('next'); }}
+                  onPointerDown={(e) => handleWheelButtonDown(e, 'next')}
+                  onPointerUp={(e) => handleWheelButtonUp(e, 'next')}
+                  onPointerLeave={() => setActiveButton(null)}
                 >
                   <NextIcon className="opacity-90" />
                 </div>

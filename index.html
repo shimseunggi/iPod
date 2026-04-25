@@ -175,6 +175,7 @@
       const interactionState = useRef({ prevAngle: null, accumulatedDelta: 0 });
       const wheelScrollAccumulator = useRef(0);
       const audioCtxRef = useRef(null);
+      const lastHapticAtRef = useRef(0);
       const sleepTimerRef = useRef(null);
 
       const currentMenu = menuStack[menuStack.length - 1];
@@ -245,8 +246,45 @@
         } catch(e) { } 
       }, []);
 
-      const triggerHaptic = useCallback(() => {
-        if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(10);
+      const triggerHaptic = useCallback((kind = 'selection') => {
+        try {
+          const isPulse = kind === 'selection' || kind === 'button';
+          if (isPulse) {
+            const now = window.performance?.now?.() ?? Date.now();
+            if (now - lastHapticAtRef.current < 35) return;
+            lastHapticAtRef.current = now;
+          }
+
+          const payload = { type: 'haptic', kind };
+          const handlers = window.webkit?.messageHandlers;
+          const iosHandler = handlers?.haptic || handlers?.haptics || handlers?.iPodHaptic;
+          if (iosHandler?.postMessage) {
+            iosHandler.postMessage(payload);
+            return;
+          }
+
+          const capacitorHaptics = window.Capacitor?.Plugins?.Haptics;
+          if (capacitorHaptics) {
+            if (kind === 'selection-start' && capacitorHaptics.selectionStart) {
+              capacitorHaptics.selectionStart();
+              return;
+            }
+            if (kind === 'selection' && capacitorHaptics.selectionChanged) {
+              capacitorHaptics.selectionChanged();
+              return;
+            }
+            if (kind === 'selection-end' && capacitorHaptics.selectionEnd) {
+              capacitorHaptics.selectionEnd();
+              return;
+            }
+            if (isPulse && capacitorHaptics.impact) {
+              capacitorHaptics.impact({ style: 'LIGHT' });
+              return;
+            }
+          }
+
+          if (isPulse && navigator.vibrate) navigator.vibrate(kind === 'button' ? 12 : 8);
+        } catch(e) { }
       }, []);
 
       const handleInteraction = (actionFn) => {
@@ -272,12 +310,13 @@
           interactionState.current.prevAngle = getAngle(e, rect);
           interactionState.current.accumulatedDelta = 0;
           setIsInteracting(true);
+          triggerHaptic('selection-start');
         }
       };
 
       const processScroll = useCallback((direction) => {
         playTick();
-        triggerHaptic();
+        triggerHaptic('selection');
 
         if (currentMenu.id === 'nowplaying') {
           if (nowPlayingMode === 'volume') {
@@ -336,17 +375,18 @@
         }
       }, [isScreenOff, processScroll, resetSleepTimer]);
 
-      const handleEnd = () => {
+      const handleEnd = useCallback(() => {
+        if (isInteracting) triggerHaptic('selection-end');
         setIsInteracting(false);
         interactionState.current.prevAngle = null;
         setActiveButton(null);
-      };
+      }, [isInteracting, triggerHaptic]);
 
       useEffect(() => {
         const handleGlobalMouseUp = () => handleEnd();
         window.addEventListener('mouseup', handleGlobalMouseUp);
         return () => window.removeEventListener('mouseup', handleGlobalMouseUp);
-      }, []);
+      }, [handleEnd]);
 
       const handleNextSong = () => {
         if (currentPlaylist.length > 0 && currentSong) {
@@ -369,7 +409,7 @@
       const handleWheelAction = (action) => {
         handleInteraction(() => {
           setActiveButton(action);
-          triggerHaptic();
+          triggerHaptic('button');
           playTick();
           setTimeout(() => setActiveButton(null), 150);
 

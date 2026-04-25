@@ -176,7 +176,7 @@
       const wheelScrollAccumulator = useRef(0);
       const audioCtxRef = useRef(null);
       const lastHapticAtRef = useRef(0);
-      const hapticSwitchRef = useRef(null);
+      const activeButtonRef = useRef(null);
       const sleepTimerRef = useRef(null);
 
       const currentMenu = menuStack[menuStack.length - 1];
@@ -250,31 +250,18 @@
       const triggerSwitchHaptic = () => {
         if (!window.matchMedia?.('(pointer: coarse)').matches) return false;
 
-        if (!hapticSwitchRef.current) {
-          const labelEl = document.createElement('label');
-          const inputEl = document.createElement('input');
+        const labelEl = document.createElement('label');
+        const inputEl = document.createElement('input');
 
-          labelEl.ariaHidden = 'true';
-          labelEl.style.cssText = [
-            'position:fixed',
-            'left:-1000px',
-            'top:-1000px',
-            'width:1px',
-            'height:1px',
-            'opacity:0',
-            'pointer-events:none',
-            'z-index:-1',
-          ].join(';');
-          inputEl.type = 'checkbox';
-          inputEl.tabIndex = -1;
-          inputEl.setAttribute('switch', '');
+        labelEl.ariaHidden = 'true';
+        labelEl.style.display = 'none';
+        inputEl.type = 'checkbox';
+        inputEl.setAttribute('switch', '');
 
-          labelEl.appendChild(inputEl);
-          document.body.appendChild(labelEl);
-          hapticSwitchRef.current = labelEl;
-        }
-
-        hapticSwitchRef.current.click();
+        labelEl.appendChild(inputEl);
+        document.head.appendChild(labelEl);
+        labelEl.click();
+        document.head.removeChild(labelEl);
 
         return true;
       };
@@ -337,21 +324,27 @@
         actionFn();
       };
 
-      const getAngle = (e, rect) => {
+      const getAngleFromPoint = (clientX, clientY, rect) => {
         const centerX = rect.left + rect.width / 2;
         const centerY = rect.top + rect.height / 2;
-        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
         return Math.atan2(clientY - centerY, clientX - centerX) * (180 / Math.PI);
       };
 
+      const getEventPoint = (e) => {
+        const touch = e.touches?.[0] || e.changedTouches?.[0];
+        if (touch) return { clientX: touch.clientX, clientY: touch.clientY };
+        return { clientX: e.clientX, clientY: e.clientY };
+      };
+
       const handleStart = (e) => {
+        if (e.pointerType === 'touch') return;
         resetSleepTimer();
         if (isScreenOff) return;
         if (e.target.closest('.wheel-btn') || e.target.id === 'center-btn') return;
         if (wheelRef.current) {
           const rect = wheelRef.current.getBoundingClientRect();
-          interactionState.current.prevAngle = getAngle(e, rect);
+          const point = getEventPoint(e);
+          interactionState.current.prevAngle = getAngleFromPoint(point.clientX, point.clientY, rect);
           interactionState.current.accumulatedDelta = 0;
           setIsInteracting(true);
           triggerHaptic('selection-start');
@@ -386,11 +379,13 @@
       }, [currentMenu.id, currentMenu.items, isSelectionActive, selectedIndex, nowPlayingMode, currentSong, playTick, triggerHaptic]);
 
       const handleMove = useCallback((e) => {
+        if (e.pointerType === 'touch') return;
         if (!isInteracting || !wheelRef.current || isScreenOff) return;
         resetSleepTimer();
 
         const rect = wheelRef.current.getBoundingClientRect();
-        const currentAngle = getAngle(e, rect);
+        const point = getEventPoint(e);
+        const currentAngle = getAngleFromPoint(point.clientX, point.clientY, rect);
         const prevAngle = interactionState.current.prevAngle;
 
         if (prevAngle !== null) {
@@ -410,6 +405,73 @@
         if (e.cancelable) e.preventDefault();
       }, [isInteracting, isScreenOff, processScroll, resetSleepTimer]);
 
+      const handleEnd = useCallback(() => {
+        if (isInteracting) triggerHaptic('selection-end');
+        setIsInteracting(false);
+        interactionState.current.prevAngle = null;
+        activeButtonRef.current = null;
+        setActiveButton(null);
+      }, [isInteracting, triggerHaptic]);
+
+      useEffect(() => {
+        const wheel = wheelRef.current;
+        if (!wheel) return;
+
+        const handleTouchStart = (e) => {
+          resetSleepTimer();
+          if (isScreenOff) return;
+          if (e.target.closest('.wheel-btn') || e.target.id === 'center-btn') return;
+          if (!e.touches?.[0]) return;
+
+          const rect = wheel.getBoundingClientRect();
+          const point = getEventPoint(e);
+          interactionState.current.prevAngle = getAngleFromPoint(point.clientX, point.clientY, rect);
+          interactionState.current.accumulatedDelta = 0;
+          setIsInteracting(true);
+          triggerHaptic('selection-start');
+          if (e.cancelable) e.preventDefault();
+        };
+
+        const handleTouchMove = (e) => {
+          if (!e.touches?.[0] || isScreenOff) return;
+          resetSleepTimer();
+
+          const rect = wheel.getBoundingClientRect();
+          const point = getEventPoint(e);
+          const currentAngle = getAngleFromPoint(point.clientX, point.clientY, rect);
+          const prevAngle = interactionState.current.prevAngle;
+
+          if (prevAngle !== null) {
+            let delta = currentAngle - prevAngle;
+            if (delta > 180) delta -= 360;
+            else if (delta < -180) delta += 360;
+
+            interactionState.current.accumulatedDelta += delta;
+            const sensitivity = 15;
+
+            if (Math.abs(interactionState.current.accumulatedDelta) > sensitivity) {
+              processScroll(interactionState.current.accumulatedDelta > 0 ? -1 : 1);
+              interactionState.current.accumulatedDelta = 0;
+            }
+          }
+
+          interactionState.current.prevAngle = currentAngle;
+          if (e.cancelable) e.preventDefault();
+        };
+
+        wheel.addEventListener('touchstart', handleTouchStart, { passive: false });
+        wheel.addEventListener('touchmove', handleTouchMove, { passive: false });
+        wheel.addEventListener('touchend', handleEnd, { passive: false });
+        wheel.addEventListener('touchcancel', handleEnd, { passive: false });
+
+        return () => {
+          wheel.removeEventListener('touchstart', handleTouchStart);
+          wheel.removeEventListener('touchmove', handleTouchMove);
+          wheel.removeEventListener('touchend', handleEnd);
+          wheel.removeEventListener('touchcancel', handleEnd);
+        };
+      }, [handleEnd, isScreenOff, processScroll, resetSleepTimer, triggerHaptic]);
+
       const handleNativeWheel = useCallback((e) => {
         if (isScreenOff) return resetSleepTimer();
         resetSleepTimer();
@@ -421,13 +483,6 @@
           wheelScrollAccumulator.current = 0;
         }
       }, [isScreenOff, processScroll, resetSleepTimer]);
-
-      const handleEnd = useCallback(() => {
-        if (isInteracting) triggerHaptic('selection-end');
-        setIsInteracting(false);
-        interactionState.current.prevAngle = null;
-        setActiveButton(null);
-      }, [isInteracting, triggerHaptic]);
 
       useEffect(() => {
         const handleGlobalMouseUp = () => handleEnd();
@@ -455,10 +510,16 @@
 
       const handleWheelAction = (action) => {
         handleInteraction(() => {
+          activeButtonRef.current = action;
           setActiveButton(action);
           triggerHaptic('button');
           playTick();
-          setTimeout(() => setActiveButton(null), 150);
+          setTimeout(() => {
+            if (activeButtonRef.current === action) {
+              activeButtonRef.current = null;
+              setActiveButton(null);
+            }
+          }, 150);
 
           if (action === 'menu') {
             setIsSelectionActive(false); 
@@ -514,16 +575,25 @@
 
       const handleWheelButtonDown = (e, action) => {
         e.stopPropagation();
-        handleInteraction(() => setActiveButton(action));
+        handleInteraction(() => {
+          activeButtonRef.current = action;
+          setActiveButton(action);
+        });
       };
 
       const handleWheelButtonUp = (e, action) => {
         e.stopPropagation();
-        if (activeButton === action) {
+        if (activeButtonRef.current === action) {
           handleWheelAction(action);
         } else {
+          activeButtonRef.current = null;
           setActiveButton(null);
         }
+      };
+
+      const clearActiveButton = () => {
+        activeButtonRef.current = null;
+        setActiveButton(null);
       };
 
       const formatTime = (seconds) => {
@@ -695,7 +765,7 @@
                   className={`absolute top-[12px] left-1/2 -translate-x-1/2 w-16 h-8 flex items-center justify-center font-bold text-[#959595] text-[12px] tracking-[0.15em] cursor-pointer wheel-btn ${activeButton === 'menu' ? 'text-[#3B99D8]' : ''}`}
                   onPointerDown={(e) => handleWheelButtonDown(e, 'menu')}
                   onPointerUp={(e) => handleWheelButtonUp(e, 'menu')}
-                  onPointerLeave={() => setActiveButton(null)}
+                  onPointerLeave={clearActiveButton}
                 >
                   MENU
                 </div>
@@ -704,7 +774,7 @@
                   className={`absolute bottom-[14px] left-1/2 -translate-x-1/2 w-16 h-8 flex items-center justify-center text-[#959595] cursor-pointer wheel-btn gap-1 ${activeButton === 'playpause' ? 'text-[#3B99D8]' : ''}`}
                   onPointerDown={(e) => handleWheelButtonDown(e, 'playpause')}
                   onPointerUp={(e) => handleWheelButtonUp(e, 'playpause')}
-                  onPointerLeave={() => setActiveButton(null)}
+                  onPointerLeave={clearActiveButton}
                 >
                   <PlayPauseIcon className="opacity-90" />
                 </div>
@@ -713,7 +783,7 @@
                   className={`absolute left-[14px] top-1/2 -translate-y-1/2 w-8 h-16 flex items-center justify-center text-[#959595] cursor-pointer wheel-btn ${activeButton === 'prev' ? 'text-[#3B99D8]' : ''}`}
                   onPointerDown={(e) => handleWheelButtonDown(e, 'prev')}
                   onPointerUp={(e) => handleWheelButtonUp(e, 'prev')}
-                  onPointerLeave={() => setActiveButton(null)}
+                  onPointerLeave={clearActiveButton}
                 >
                   <PrevIcon className="opacity-90" />
                 </div>
@@ -722,7 +792,7 @@
                   className={`absolute right-[14px] top-1/2 -translate-y-1/2 w-8 h-16 flex items-center justify-center text-[#959595] cursor-pointer wheel-btn ${activeButton === 'next' ? 'text-[#3B99D8]' : ''}`}
                   onPointerDown={(e) => handleWheelButtonDown(e, 'next')}
                   onPointerUp={(e) => handleWheelButtonUp(e, 'next')}
-                  onPointerLeave={() => setActiveButton(null)}
+                  onPointerLeave={clearActiveButton}
                 >
                   <NextIcon className="opacity-90" />
                 </div>
@@ -731,9 +801,9 @@
                   id="center-btn"
                   className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[70px] h-[70px] rounded-full shadow-[inset_0_2px_4px_rgba(0,0,0,0.1),0_1px_2px_rgba(255,255,255,0.8)] flex items-center justify-center cursor-pointer border border-[#c4c4c4]"
                   style={{ backgroundColor: activeButton === 'center' ? '#b5b5b5' : '#D1D1D1' }}
-                  onPointerDown={(e) => { e.stopPropagation(); handleInteraction(() => setActiveButton('center')); }}
-                  onPointerUp={(e) => { e.stopPropagation(); if(activeButton === 'center') handleWheelAction('center'); }}
-                  onPointerLeave={() => setActiveButton(null)}
+                  onPointerDown={(e) => handleWheelButtonDown(e, 'center')}
+                  onPointerUp={(e) => handleWheelButtonUp(e, 'center')}
+                  onPointerLeave={clearActiveButton}
                 >
                   <div className="w-full h-full rounded-full bg-gradient-to-br from-white/20 to-transparent pointer-events-none"></div>
                 </div>

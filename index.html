@@ -360,7 +360,6 @@
 
       const processScroll = useCallback((direction) => {
         playTick();
-        triggerHaptic('selection');
 
         if (currentMenu.id === 'nowplaying') {
           if (nowPlayingMode === 'volume') {
@@ -374,13 +373,17 @@
           if (!isSelectionActive) {
             setIsSelectionActive(true);
           } else {
-            setSelectedIndex(prev => {
-              if (direction > 0) return Math.max(prev - 1, 0); 
-              return Math.min(prev + 1, currentMenu.items.length - 1); 
-            });
+            const nextIndex = direction > 0
+              ? Math.max(selectedIndex - 1, 0)
+              : Math.min(selectedIndex + 1, currentMenu.items.length - 1);
+
+            if (nextIndex !== selectedIndex) {
+              triggerHaptic('selection');
+              setSelectedIndex(nextIndex);
+            }
           }
         }
-      }, [currentMenu.id, currentMenu.items, isSelectionActive, nowPlayingMode, currentSong, playTick, triggerHaptic]);
+      }, [currentMenu.id, currentMenu.items, isSelectionActive, selectedIndex, nowPlayingMode, currentSong, playTick, triggerHaptic]);
 
       const handleMove = useCallback((e) => {
         if (!isInteracting || !wheelRef.current || isScreenOff) return;

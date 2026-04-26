@@ -424,17 +424,34 @@ function App() {
   useEffect(() => {
     resetSleepTimer();
 
-    // 백그라운드에서 AudioContext를 미리 초기화하여 첫 클릭 시 발생하는 렉(프리징) 방지
-    const initAudio = setTimeout(() => {
+    // 앱 시작 직후 메인 스레드 경쟁을 피하기 위해 오디오 컨텍스트는 idle 구간에 지연 초기화
+    let initAudioTimeout = null;
+    let idleHandle = null;
+    const warmAudioContext = () => {
       try {
         if (!audioCtxRef.current) {
           audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
         }
       } catch (e) {}
-    }, 100);
+    };
+    const scheduleAudioWarmup = () => {
+      if (typeof window.requestIdleCallback === 'function') {
+        idleHandle = window.requestIdleCallback(() => {
+          initAudioTimeout = window.setTimeout(warmAudioContext, 300);
+        }, {
+          timeout: 1200
+        });
+        return;
+      }
+      initAudioTimeout = window.setTimeout(warmAudioContext, 1200);
+    };
+    scheduleAudioWarmup();
     return () => {
       clearTimeout(sleepTimerRef.current);
-      clearTimeout(initAudio);
+      if (initAudioTimeout) clearTimeout(initAudioTimeout);
+      if (idleHandle && typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(idleHandle);
+      }
     };
   }, [resetSleepTimer]);
   const playTick = useCallback(() => {

@@ -11,6 +11,9 @@ mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
 cp "$ROOT_DIR/mac/Info.plist" "$CONTENTS_DIR/Info.plist"
 cp "$ROOT_DIR/index.html" "$RESOURCES_DIR/index.html"
+cp "$ROOT_DIR/app.js" "$RESOURCES_DIR/app.js"
+cp "$ROOT_DIR/styles.css" "$RESOURCES_DIR/styles.css"
+cp -r "$ROOT_DIR/libs" "$RESOURCES_DIR/libs"
 
 swiftc "$ROOT_DIR/mac/iPodMusicApp.swift" \
   -o "$MACOS_DIR/iPodMusic" \
